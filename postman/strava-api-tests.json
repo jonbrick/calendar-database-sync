@@ -1,0 +1,65 @@
+{
+  "info": {
+    "name": "Strava Workout Tracker API Tests",
+    "description": "Test Strava API endpoints for workout tracking",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "strava_access_token",
+      "value": "YOUR_ACCESS_TOKEN",
+      "type": "string"
+    },
+    {
+      "key": "base_url",
+      "value": "https://www.strava.com/api/v3",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Test Authentication",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{strava_access_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/athlete",
+          "host": ["{{base_url}}"],
+          "path": ["athlete"]
+        },
+        "description": "Test your access token and get your athlete profile"
+      }
+    },
+    {
+      "name": "2. Get Recent Activities",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{strava_access_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/athlete/activities?per_page=10",
+          "host": ["{{base_url}}"],
+          "path": ["athlete", "activities"],
+          "query": [
+            {
+              "key": "per_page",
+              "value": "10"
+            }
+          ]
+        },
+        "description": "Get your 10 most recent activities"
+      }
+    }
+  ]
+}
