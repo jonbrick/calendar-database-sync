@@ -432,7 +432,11 @@ class CalendarClient {
   }
 
   formatSleepEventTitle(sleepRecord) {
-    return `Sleep - ${sleepRecord.sleepDuration}hrs (${sleepRecord.efficiency}% efficiency)`;
+    const calendarType =
+      sleepRecord.googleCalendar === "Normal Wake Up"
+        ? "Wake up before 7 am"
+        : "Sleep In";
+    return `${calendarType} - ${sleepRecord.sleepDuration}hrs (${sleepRecord.efficiency}% efficiency)`;
   }
 
   formatSleepEventDescription(sleepRecord) {
