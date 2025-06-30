@@ -257,12 +257,26 @@ class CalendarClient {
       refresh_token: process.env.PERSONAL_GOOGLE_REFRESH_TOKEN,
     });
 
+    // Work account auth
+    this.workAuth = new google.auth.OAuth2(
+      process.env.WORK_GOOGLE_CLIENT_ID,
+      process.env.WORK_GOOGLE_CLIENT_SECRET
+    );
+    this.workAuth.setCredentials({
+      refresh_token: process.env.WORK_GOOGLE_REFRESH_TOKEN,
+    });
+
     this.personalCalendar = google.calendar({
       version: "v3",
       auth: this.personalAuth,
     });
+    this.workCalendar = google.calendar({
+      version: "v3",
+      auth: this.workAuth,
+    });
 
     this.prsPersonalCalendarId = process.env.PRS_PERSONAL_CALENDAR_ID;
+    this.prsWorkCalendarId = process.env.PRS_WORK_CALENDAR_ID;
     this.fitnessCalendarId = process.env.FITNESS_CALENDAR_ID;
     this.normalWakeUpCalendarId = process.env.NORMAL_WAKE_UP_CALENDAR_ID;
     this.sleepInCalendarId = process.env.SLEEP_IN_CALENDAR_ID;
@@ -306,6 +320,39 @@ class CalendarClient {
       return response;
     } catch (error) {
       console.error("❌ Error creating GitHub calendar event:", error.message);
+      throw error;
+    }
+  }
+
+  async createWorkGitHubEvent(activity) {
+    try {
+      // Use work PRs calendar for work repos
+      const calendarId = this.prsWorkCalendarId;
+
+      // Create all-day event
+      const eventDate = activity.date; // YYYY-MM-DD format
+      const title = this.formatGitHubEventTitle(activity);
+      const description = this.formatGitHubEventDescription(activity);
+
+      const event = {
+        summary: title,
+        description: description,
+        start: { date: eventDate },
+        end: { date: eventDate },
+      };
+
+      const response = await this.workCalendar.events.insert({
+        calendarId: calendarId,
+        resource: event,
+      });
+
+      console.log(`✅ Created Work GitHub calendar event: ${title}`);
+      return response;
+    } catch (error) {
+      console.error(
+        "❌ Error creating Work GitHub calendar event:",
+        error.message
+      );
       throw error;
     }
   }
@@ -447,6 +494,63 @@ class CalendarClient {
 
     return description;
   }
+}
+
+async function syncGitHubWork(weekStart, weekEnd, selectedDate, optionInput) {
+  console.log("💼 GitHub Work Sync\n");
+
+  const notion = new NotionClient();
+  const calendar = new CalendarClient();
+
+  // Test connections
+  await testConnections({ notion, calendar });
+
+  if (optionInput === "1") {
+    console.log(
+      `\n📊 Syncing Work GitHub activities for Date ${selectedDate.toDateString()}`
+    );
+  } else {
+    console.log(
+      `\n📊 Syncing Work GitHub activities from ${weekStart.toDateString()} to ${weekEnd.toDateString()}`
+    );
+  }
+
+  const activities = await notion.getGitHubActivitiesForWeek(
+    weekStart,
+    weekEnd
+  );
+
+  if (activities.length === 0) {
+    console.log("📭 No GitHub activities found without calendar events");
+    return;
+  }
+
+  // Filter to work repos only
+  const workActivities = activities.filter(
+    (activity) => activity.projectType === "Work"
+  );
+
+  console.log(
+    `🔍 Found ${workActivities.length} work GitHub activities to sync`
+  );
+
+  let createdCount = 0;
+  for (const activity of workActivities) {
+    try {
+      await calendar.createWorkGitHubEvent(activity);
+      await notion.markCalendarCreated(activity.id);
+      createdCount++;
+      console.log(
+        `✅ Synced: ${activity.repository} (${activity.commitsCount} commits)`
+      );
+    } catch (error) {
+      console.error(`❌ Failed to sync ${activity.repository}:`, error.message);
+    }
+  }
+
+  console.log(
+    `\n✅ Successfully synced ${createdCount} work GitHub activities!`
+  );
 }
 
 async function syncGitHubPersonal(
@@ -605,11 +709,12 @@ async function main() {
   console.log("🔄 Calendar Sync App\n");
   console.log("Available syncs:");
   console.log("1. GitHub Personal");
-  console.log("2. Workouts");
-  console.log("3. Sleep");
-  console.log("4. All (GitHub Personal + Workouts + Sleep)");
+  console.log("2. GitHub Work");
+  console.log("3. Workouts");
+  console.log("4. Sleep");
+  console.log("5. All (GitHub Personal + GitHub Work + Workouts + Sleep)");
 
-  const choice = await askQuestion("\n? Choose sync type (1-4): ");
+  const choice = await askQuestion("\n? Choose sync type (1-5): ");
 
   // Get date selection using the unified CLI utilities
   const { weekStart, weekEnd, dateRangeLabel, selectedDate, optionInput } =
@@ -637,9 +742,10 @@ async function main() {
   // Show which sync type will run
   const syncTypes = {
     1: "GitHub Personal",
-    2: "Workouts",
-    3: "Sleep",
-    4: "All (GitHub Personal + Workouts + Sleep)",
+    2: "GitHub Work",
+    3: "Workouts",
+    4: "Sleep",
+    5: "All (GitHub Personal + GitHub Work + Workouts + Sleep)",
   };
   console.log(`🔄 Sync type: ${syncTypes[choice]}`);
 
@@ -668,21 +774,26 @@ async function main() {
       await syncGitHubPersonal(weekStart, weekEnd, selectedDate, optionInput);
       break;
     case "2":
-      await syncWorkouts(weekStart, weekEnd, selectedDate, optionInput);
+      await syncGitHubWork(weekStart, weekEnd, selectedDate, optionInput);
       break;
     case "3":
-      await syncSleep(weekStart, weekEnd, selectedDate, optionInput);
+      await syncWorkouts(weekStart, weekEnd, selectedDate, optionInput);
       break;
     case "4":
+      await syncSleep(weekStart, weekEnd, selectedDate, optionInput);
+      break;
+    case "5":
       console.log("🔄 Running all syncs...\n");
       await syncGitHubPersonal(weekStart, weekEnd, selectedDate, optionInput);
+      console.log("\n" + "=".repeat(50) + "\n");
+      await syncGitHubWork(weekStart, weekEnd, selectedDate, optionInput);
       console.log("\n" + "=".repeat(50) + "\n");
       await syncWorkouts(weekStart, weekEnd, selectedDate, optionInput);
       console.log("\n" + "=".repeat(50) + "\n");
       await syncSleep(weekStart, weekEnd, selectedDate, optionInput);
       break;
     default:
-      console.log("❌ Invalid choice. Please run again and choose 1-4.");
+      console.log("❌ Invalid choice. Please run again and choose 1-5.");
   }
 }
 
