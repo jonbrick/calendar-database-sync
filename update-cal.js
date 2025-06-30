@@ -1,57 +1,12 @@
 const { Client } = require("@notionhq/client");
 const { google } = require("googleapis");
+const {
+  testConnections,
+  getDateSelection,
+  closeReadline,
+  askQuestion,
+} = require("./lib/cli-utils.js");
 require("dotenv").config();
-
-// Week calculation utilities for Sunday-Saturday weeks
-function getWeekBoundaries(year, weekNumber) {
-  // Week 1 starts January 1st, regardless of day of week
-  const jan1 = new Date(year, 0, 1); // January 1st
-
-  // Find the first Sunday of the year (or before Jan 1 if Jan 1 is not Sunday)
-  const jan1DayOfWeek = jan1.getDay(); // 0 = Sunday, 1 = Monday, etc.
-
-  let firstSunday;
-  if (jan1DayOfWeek === 0) {
-    // Jan 1 is Sunday - Week 1 starts Jan 1
-    firstSunday = new Date(jan1);
-  } else {
-    // Jan 1 is not Sunday - Week 1 started the previous Sunday
-    firstSunday = new Date(jan1);
-    firstSunday.setDate(jan1.getDate() - jan1DayOfWeek);
-  }
-
-  // Calculate week start (Sunday)
-  const weekStart = new Date(firstSunday);
-  weekStart.setDate(firstSunday.getDate() + (weekNumber - 1) * 7);
-
-  // Calculate week end (Saturday)
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 6);
-  weekEnd.setHours(23, 59, 59, 999);
-
-  return { weekStart, weekEnd };
-}
-
-function generateWeekOptions(year) {
-  const weeks = [];
-  for (let i = 1; i <= 52; i++) {
-    const { weekStart, weekEnd } = getWeekBoundaries(year, i);
-    const startStr = weekStart.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-    });
-    const endStr = weekEnd.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-    });
-
-    weeks.push({
-      value: i,
-      label: `Week ${i.toString().padStart(2, "0")} (${startStr} - ${endStr})`,
-    });
-  }
-  return weeks;
-}
 
 class NotionClient {
   constructor() {
@@ -494,24 +449,29 @@ class CalendarClient {
   }
 }
 
-async function syncGitHubPersonal(weekStart, weekEnd) {
+async function syncGitHubPersonal(
+  weekStart,
+  weekEnd,
+  selectedDate,
+  optionInput
+) {
   console.log("💻 GitHub Personal Sync\n");
 
   const notion = new NotionClient();
   const calendar = new CalendarClient();
 
   // Test connections
-  const notionOk = await notion.testConnection();
-  const calendarOk = await calendar.testConnection();
+  await testConnections({ notion, calendar });
 
-  if (!notionOk || !calendarOk) {
-    console.log("❌ Connection failed. Check your .env file.");
-    return;
+  if (optionInput === "1") {
+    console.log(
+      `\n📊 Syncing GitHub activities for Date ${selectedDate.toDateString()}`
+    );
+  } else {
+    console.log(
+      `\n📊 Syncing GitHub activities from ${weekStart.toDateString()} to ${weekEnd.toDateString()}`
+    );
   }
-
-  console.log(
-    `\n📊 Syncing GitHub activities from ${weekStart.toDateString()} to ${weekEnd.toDateString()}`
-  );
 
   const activities = await notion.getGitHubActivitiesForWeek(
     weekStart,
@@ -549,24 +509,24 @@ async function syncGitHubPersonal(weekStart, weekEnd) {
   console.log(`\n✅ Successfully synced ${createdCount} GitHub activities!`);
 }
 
-async function syncWorkouts(weekStart, weekEnd) {
+async function syncWorkouts(weekStart, weekEnd, selectedDate, optionInput) {
   console.log("💪 Workout Sync\n");
 
   const notion = new NotionClient();
   const calendar = new CalendarClient();
 
   // Test connections
-  const notionOk = await notion.testConnection();
-  const calendarOk = await calendar.testConnection();
+  await testConnections({ notion, calendar });
 
-  if (!notionOk || !calendarOk) {
-    console.log("❌ Connection failed. Check your .env file.");
-    return;
+  if (optionInput === "1") {
+    console.log(
+      `\n📊 Syncing workouts for Date ${selectedDate.toDateString()}`
+    );
+  } else {
+    console.log(
+      `\n📊 Syncing workouts from ${weekStart.toDateString()} to ${weekEnd.toDateString()}`
+    );
   }
-
-  console.log(
-    `\n📊 Syncing workouts from ${weekStart.toDateString()} to ${weekEnd.toDateString()}`
-  );
 
   const workouts = await notion.getWorkoutsForWeek(weekStart, weekEnd);
 
@@ -597,24 +557,22 @@ async function syncWorkouts(weekStart, weekEnd) {
   console.log(`\n✅ Successfully synced ${createdCount} workouts!`);
 }
 
-async function syncSleep(weekStart, weekEnd) {
+async function syncSleep(weekStart, weekEnd, selectedDate, optionInput) {
   console.log("😴 Sleep Sync\n");
 
   const notion = new NotionClient();
   const calendar = new CalendarClient();
 
   // Test connections
-  const notionOk = await notion.testConnection();
-  const calendarOk = await calendar.testConnection();
+  await testConnections({ notion, calendar });
 
-  if (!notionOk || !calendarOk) {
-    console.log("❌ Connection failed. Check your .env file.");
-    return;
+  if (optionInput === "1") {
+    console.log(`\n📊 Syncing sleep for Date ${selectedDate.toDateString()}`);
+  } else {
+    console.log(
+      `\n📊 Syncing sleep from ${weekStart.toDateString()} to ${weekEnd.toDateString()}`
+    );
   }
-
-  console.log(
-    `\n📊 Syncing sleep from ${weekStart.toDateString()} to ${weekEnd.toDateString()}`
-  );
 
   const sleepRecords = await notion.getSleepForWeek(weekStart, weekEnd);
 
@@ -644,20 +602,6 @@ async function syncSleep(weekStart, weekEnd) {
 
 // Main execution
 async function main() {
-  const readline = require("readline");
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  function askQuestion(question) {
-    return new Promise((resolve) => {
-      rl.question(question, (answer) => {
-        resolve(answer);
-      });
-    });
-  }
-
   console.log("🔄 Calendar Sync App\n");
   console.log("Available syncs:");
   console.log("1. GitHub Personal");
@@ -667,53 +611,37 @@ async function main() {
 
   const choice = await askQuestion("\n? Choose sync type (1-4): ");
 
-  // Week selection
-  console.log("\n📅 Available weeks:");
-  const weeks = generateWeekOptions(2025);
+  // Get date selection using the unified CLI utilities
+  const { weekStart, weekEnd, dateRangeLabel, selectedDate, optionInput } =
+    await getDateSelection();
 
-  // Show first few weeks as examples
-  weeks.slice(0, 5).forEach((week) => {
-    console.log(`  ${week.value} - ${week.label}`);
-  });
-  console.log("  ...");
-  console.log(`  52 - ${weeks[51].label}\n`);
+  closeReadline();
 
-  const weekInput = await askQuestion(
-    "? Which week to process? (enter week number): "
-  );
-  const weekNumber = parseInt(weekInput);
-
-  if (weekNumber < 1 || weekNumber > 52) {
-    console.log("❌ Invalid week number");
-    rl.close();
-    return;
+  if (optionInput === "1") {
+    console.log(`\n📊 Processing ${dateRangeLabel}`);
+  } else {
+    console.log(
+      `\n📊 Processing ${dateRangeLabel}: ${weekStart.toDateString()} - ${weekEnd.toDateString()}`
+    );
   }
-
-  const { weekStart, weekEnd } = getWeekBoundaries(2025, weekNumber);
-
-  rl.close();
-
-  console.log(
-    `\n📊 Processing Week ${weekNumber}: ${weekStart.toDateString()} - ${weekEnd.toDateString()}\n`
-  );
 
   switch (choice) {
     case "1":
-      await syncGitHubPersonal(weekStart, weekEnd);
+      await syncGitHubPersonal(weekStart, weekEnd, selectedDate, optionInput);
       break;
     case "2":
-      await syncWorkouts(weekStart, weekEnd);
+      await syncWorkouts(weekStart, weekEnd, selectedDate, optionInput);
       break;
     case "3":
-      await syncSleep(weekStart, weekEnd);
+      await syncSleep(weekStart, weekEnd, selectedDate, optionInput);
       break;
     case "4":
       console.log("🔄 Running all syncs...\n");
-      await syncGitHubPersonal(weekStart, weekEnd);
+      await syncGitHubPersonal(weekStart, weekEnd, selectedDate, optionInput);
       console.log("\n" + "=".repeat(50) + "\n");
-      await syncWorkouts(weekStart, weekEnd);
+      await syncWorkouts(weekStart, weekEnd, selectedDate, optionInput);
       console.log("\n" + "=".repeat(50) + "\n");
-      await syncSleep(weekStart, weekEnd);
+      await syncSleep(weekStart, weekEnd, selectedDate, optionInput);
       break;
     default:
       console.log("❌ Invalid choice. Please run again and choose 1-4.");
