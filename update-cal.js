@@ -432,11 +432,7 @@ class CalendarClient {
   }
 
   formatSleepEventTitle(sleepRecord) {
-    const calendarType =
-      sleepRecord.googleCalendar === "Normal Wake Up"
-        ? "Wake up before 7 am"
-        : "Sleep In";
-    return `${calendarType} - ${sleepRecord.sleepDuration}hrs (${sleepRecord.efficiency}% efficiency)`;
+    return `Sleep - ${sleepRecord.sleepDuration}hrs (${sleepRecord.efficiency}% efficiency)`;
   }
 
   formatSleepEventDescription(sleepRecord) {
@@ -618,6 +614,44 @@ async function main() {
   // Get date selection using the unified CLI utilities
   const { weekStart, weekEnd, dateRangeLabel, selectedDate, optionInput } =
     await getDateSelection();
+
+  // Confirmation step
+  console.log("\n📋 Summary:");
+
+  if (optionInput === "1") {
+    console.log(`📊 Single day operation`);
+    console.log(`📅 Date: ${selectedDate.toDateString()}`);
+    console.log(
+      `🗓️ Calendar Date: ${selectedDate.toDateString()} (${
+        selectedDate.toISOString().split("T")[0]
+      })`
+    );
+  } else {
+    const totalDays = Math.ceil((weekEnd - weekStart) / (1000 * 60 * 60 * 24));
+    console.log(`📊 Total days: ${totalDays} days`);
+    console.log(
+      `📅 Date range: ${weekStart.toDateString()} - ${weekEnd.toDateString()}`
+    );
+  }
+
+  // Show which sync type will run
+  const syncTypes = {
+    1: "GitHub Personal",
+    2: "Workouts",
+    3: "Sleep",
+    4: "All (GitHub Personal + Workouts + Sleep)",
+  };
+  console.log(`🔄 Sync type: ${syncTypes[choice]}`);
+
+  const confirm = await askQuestion(
+    "\n? Proceed with creating calendar events for this period? (y/n): "
+  );
+
+  if (confirm.toLowerCase() !== "y" && confirm.toLowerCase() !== "yes") {
+    console.log("❌ Operation cancelled.");
+    closeReadline();
+    return;
+  }
 
   closeReadline();
 
