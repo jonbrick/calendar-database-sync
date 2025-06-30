@@ -97,6 +97,148 @@ class NotionClient {
       console.error("❌ Error marking calendar created:", error.message);
     }
   }
+
+  async getWorkoutsForWeek(weekStart, weekEnd) {
+    try {
+      const startDateStr = weekStart.toISOString().split("T")[0];
+      const endDateStr = weekEnd.toISOString().split("T")[0];
+
+      console.log(`🔄 Reading workouts from ${startDateStr} to ${endDateStr}`);
+
+      const response = await this.notion.databases.query({
+        database_id: this.workoutsDbId,
+        filter: {
+          and: [
+            {
+              property: "Date",
+              date: { on_or_after: startDateStr },
+            },
+            {
+              property: "Date",
+              date: { on_or_before: endDateStr },
+            },
+            {
+              property: "Calendar Created",
+              checkbox: { equals: false },
+            },
+          ],
+        },
+        sorts: [{ property: "Date", direction: "ascending" }],
+      });
+
+      console.log(
+        `📊 Found ${response.results.length} workouts without calendar events`
+      );
+      return this.transformNotionToWorkouts(response.results);
+    } catch (error) {
+      console.error("❌ Error reading workouts:", error.message);
+      return [];
+    }
+  }
+
+  transformNotionToWorkouts(notionPages) {
+    return notionPages.map((page) => {
+      const props = page.properties;
+      return {
+        id: page.id,
+        activityName:
+          props["Activity Name"]?.title?.[0]?.plain_text || "Workout",
+        date: props["Date"]?.date?.start,
+        activityType: props["Activity Type"]?.select?.name || "Workout",
+        startTime: props["Start Time"]?.rich_text?.[0]?.plain_text || "",
+        duration: props["Duration"]?.number || 0,
+        distance: props["Distance"]?.number || 0,
+      };
+    });
+  }
+
+  async markWorkoutCalendarCreated(workoutId) {
+    try {
+      await this.notion.pages.update({
+        page_id: workoutId,
+        properties: {
+          "Calendar Created": { checkbox: true },
+        },
+      });
+    } catch (error) {
+      console.error(
+        "❌ Error marking workout calendar created:",
+        error.message
+      );
+    }
+  }
+
+  async getSleepForWeek(weekStart, weekEnd) {
+    try {
+      const startDateStr = weekStart.toISOString().split("T")[0];
+      const endDateStr = weekEnd.toISOString().split("T")[0];
+
+      console.log(
+        `🔄 Reading sleep records from ${startDateStr} to ${endDateStr}`
+      );
+
+      const response = await this.notion.databases.query({
+        database_id: this.sleepDbId,
+        filter: {
+          and: [
+            {
+              property: "Night of Date",
+              date: { on_or_after: startDateStr },
+            },
+            {
+              property: "Night of Date",
+              date: { on_or_before: endDateStr },
+            },
+            {
+              property: "Calendar Created",
+              checkbox: { equals: false },
+            },
+          ],
+        },
+        sorts: [{ property: "Night of Date", direction: "ascending" }],
+      });
+
+      console.log(
+        `📊 Found ${response.results.length} sleep sessions without calendar events`
+      );
+      return this.transformNotionToSleep(response.results);
+    } catch (error) {
+      console.error("❌ Error reading sleep records:", error.message);
+      return [];
+    }
+  }
+
+  transformNotionToSleep(notionPages) {
+    return notionPages.map((page) => {
+      const props = page.properties;
+      return {
+        id: page.id,
+        nightOf: props["Night of"]?.title?.[0]?.plain_text,
+        nightOfDate: props["Night of Date"]?.date?.start,
+        bedtime: props["Bedtime"]?.rich_text?.[0]?.plain_text,
+        wakeTime: props["Wake Time"]?.rich_text?.[0]?.plain_text,
+        sleepDuration: props["Sleep Duration"]?.number || 0,
+        deepSleep: props["Deep Sleep"]?.number || 0,
+        remSleep: props["REM Sleep"]?.number || 0,
+        lightSleep: props["Light Sleep"]?.number || 0,
+        efficiency: props["Efficiency"]?.number || 0,
+        googleCalendar: props["Google Calendar"]?.select?.name || "Sleep In",
+      };
+    });
+  }
+
+  async markSleepCalendarCreated(sleepId) {
+    try {
+      await this.notion.pages.update({
+        page_id: sleepId,
+        properties: {
+          "Calendar Created": { checkbox: true },
+        },
+      });
+    } catch (error) {
+      console.error("❌ Error marking sleep calendar created:", error.message);
+    }
+  }
 }
 
 class CalendarClient {
@@ -187,6 +329,118 @@ class CalendarClient {
     description += `\n📝 Commits:\n${activity.commitMessages}`;
     return description;
   }
+
+  async createWorkoutEvent(workout) {
+    try {
+      // Parse the start time - handle both ISO strings and basic formats
+      let startTime;
+      if (workout.startTime && workout.startTime.includes("T")) {
+        startTime = new Date(workout.startTime);
+      } else {
+        // Default to noon on the workout date
+        startTime = new Date(workout.date + "T12:00:00");
+      }
+
+      const endTime = new Date(
+        startTime.getTime() + (workout.duration || 30) * 60 * 1000
+      );
+
+      const title = this.formatWorkoutEventTitle(workout);
+      const description = this.formatWorkoutEventDescription(workout);
+
+      const event = {
+        summary: title,
+        description: description,
+        start: { dateTime: startTime.toISOString() },
+        end: { dateTime: endTime.toISOString() },
+      };
+
+      const response = await this.personalCalendar.events.insert({
+        calendarId: this.fitnessCalendarId,
+        resource: event,
+      });
+
+      console.log(`✅ Created workout calendar event: ${title}`);
+      return response;
+    } catch (error) {
+      console.error("❌ Error creating workout calendar event:", error.message);
+      throw error;
+    }
+  }
+
+  formatWorkoutEventTitle(workout) {
+    if (workout.distance > 0) {
+      return `${workout.activityType} - ${workout.distance} miles`;
+    } else {
+      return workout.activityName;
+    }
+  }
+
+  formatWorkoutEventDescription(workout) {
+    let description = `🏃‍♂️ ${workout.activityName}\n`;
+    description += `⏱️ Duration: ${workout.duration} minutes\n`;
+
+    if (workout.distance > 0) {
+      description += `📏 Distance: ${workout.distance} miles\n`;
+    }
+
+    description += `📊 Activity Type: ${workout.activityType}`;
+    return description;
+  }
+
+  async createSleepEvent(sleepRecord) {
+    try {
+      // Parse bedtime and wake time
+      const bedtime = new Date(sleepRecord.bedtime);
+      const wakeTime = new Date(sleepRecord.wakeTime);
+
+      const title = this.formatSleepEventTitle(sleepRecord);
+      const description = this.formatSleepEventDescription(sleepRecord);
+
+      // Choose calendar based on wake time category
+      const calendarId =
+        sleepRecord.googleCalendar === "Normal Wake Up"
+          ? this.normalWakeUpCalendarId
+          : this.sleepInCalendarId;
+
+      const event = {
+        summary: title,
+        description: description,
+        start: { dateTime: bedtime.toISOString() },
+        end: { dateTime: wakeTime.toISOString() },
+      };
+
+      const response = await this.personalCalendar.events.insert({
+        calendarId: calendarId,
+        resource: event,
+      });
+
+      console.log(
+        `✅ Created sleep calendar event: ${title} (${sleepRecord.googleCalendar})`
+      );
+      return response;
+    } catch (error) {
+      console.error("❌ Error creating sleep calendar event:", error.message);
+      throw error;
+    }
+  }
+
+  formatSleepEventTitle(sleepRecord) {
+    return `Sleep - ${sleepRecord.sleepDuration}hrs (${sleepRecord.efficiency}% efficiency)`;
+  }
+
+  formatSleepEventDescription(sleepRecord) {
+    let description = `😴 ${sleepRecord.nightOf}\n`;
+    description += `⏱️ Duration: ${sleepRecord.sleepDuration} hours\n`;
+    description += `📊 Efficiency: ${sleepRecord.efficiency}%\n\n`;
+
+    description += `🛌 Sleep Stages:\n`;
+    description += `• Deep Sleep: ${sleepRecord.deepSleep} min\n`;
+    description += `• REM Sleep: ${sleepRecord.remSleep} min\n`;
+    description += `• Light Sleep: ${sleepRecord.lightSleep} min\n\n`;
+
+    return description;
+  }
 }
 
 async function syncGitHubPersonal() {
@@ -249,15 +503,157 @@ async function syncGitHubPersonal() {
   console.log(`\n✅ Successfully synced ${createdCount} GitHub activities!`);
 }
 
+async function syncWorkouts() {
+  console.log("💪 Workout Sync\n");
+
+  const notion = new NotionClient();
+  const calendar = new CalendarClient();
+
+  // Test connections
+  const notionOk = await notion.testConnection();
+  const calendarOk = await calendar.testConnection();
+
+  if (!notionOk || !calendarOk) {
+    console.log("❌ Connection failed. Check your .env file.");
+    return;
+  }
+
+  // Get workouts from last 7 days
+  const weekEnd = new Date();
+  const weekStart = new Date();
+  weekStart.setDate(weekEnd.getDate() - 7);
+
+  console.log(
+    `\n📊 Syncing workouts from ${weekStart.toDateString()} to ${weekEnd.toDateString()}`
+  );
+
+  const workouts = await notion.getWorkoutsForWeek(weekStart, weekEnd);
+
+  if (workouts.length === 0) {
+    console.log("📭 No workouts found without calendar events");
+    return;
+  }
+
+  console.log(`🔍 Found ${workouts.length} workouts to sync`);
+
+  let createdCount = 0;
+  for (const workout of workouts) {
+    try {
+      await calendar.createWorkoutEvent(workout);
+      await notion.markWorkoutCalendarCreated(workout.id);
+      createdCount++;
+      console.log(
+        `✅ Synced: ${workout.activityName} (${workout.activityType})`
+      );
+    } catch (error) {
+      console.error(
+        `❌ Failed to sync ${workout.activityName}:`,
+        error.message
+      );
+    }
+  }
+
+  console.log(`\n✅ Successfully synced ${createdCount} workouts!`);
+}
+
+async function syncSleep() {
+  console.log("😴 Sleep Sync\n");
+
+  const notion = new NotionClient();
+  const calendar = new CalendarClient();
+
+  // Test connections
+  const notionOk = await notion.testConnection();
+  const calendarOk = await calendar.testConnection();
+
+  if (!notionOk || !calendarOk) {
+    console.log("❌ Connection failed. Check your .env file.");
+    return;
+  }
+
+  // Get sleep from last 7 days
+  const weekEnd = new Date();
+  const weekStart = new Date();
+  weekStart.setDate(weekEnd.getDate() - 7);
+
+  console.log(
+    `\n📊 Syncing sleep from ${weekStart.toDateString()} to ${weekEnd.toDateString()}`
+  );
+
+  const sleepRecords = await notion.getSleepForWeek(weekStart, weekEnd);
+
+  if (sleepRecords.length === 0) {
+    console.log("📭 No sleep records found without calendar events");
+    return;
+  }
+
+  console.log(`🔍 Found ${sleepRecords.length} sleep records to sync`);
+
+  let createdCount = 0;
+  for (const sleepRecord of sleepRecords) {
+    try {
+      await calendar.createSleepEvent(sleepRecord);
+      await notion.markSleepCalendarCreated(sleepRecord.id);
+      createdCount++;
+      console.log(
+        `✅ Synced: ${sleepRecord.nightOf} (${sleepRecord.sleepDuration}hrs)`
+      );
+    } catch (error) {
+      console.error(`❌ Failed to sync ${sleepRecord.nightOf}:`, error.message);
+    }
+  }
+
+  console.log(`\n✅ Successfully synced ${createdCount} sleep records!`);
+}
+
 // Main execution
 async function main() {
+  const readline = require("readline");
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  function askQuestion(question) {
+    return new Promise((resolve) => {
+      rl.question(question, (answer) => {
+        resolve(answer);
+      });
+    });
+  }
+
   console.log("🔄 Calendar Sync App\n");
-
   console.log("Available syncs:");
-  console.log("1. GitHub Personal (only option for now)");
+  console.log("1. GitHub Personal");
+  console.log("2. Workouts");
+  console.log("3. Sleep");
+  console.log("4. All (GitHub Personal + Workouts + Sleep)");
 
-  // For now, just run GitHub personal
-  await syncGitHubPersonal();
+  const choice = await askQuestion("\n? Choose sync type (1-4): ");
+
+  rl.close();
+
+  switch (choice) {
+    case "1":
+      await syncGitHubPersonal();
+      break;
+    case "2":
+      await syncWorkouts();
+      break;
+    case "3":
+      await syncSleep();
+      break;
+    case "4":
+      console.log("🔄 Running all syncs...\n");
+      await syncGitHubPersonal();
+      console.log("\n" + "=".repeat(50) + "\n");
+      await syncWorkouts();
+      console.log("\n" + "=".repeat(50) + "\n");
+      await syncSleep();
+      break;
+    default:
+      console.log("❌ Invalid choice. Please run again and choose 1-4.");
+  }
 }
 
 main().catch(console.error);
