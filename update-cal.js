@@ -33,7 +33,10 @@ class NotionClient {
   async getGitHubActivitiesForWeek(weekStart, weekEnd) {
     try {
       const startDateStr = weekStart.toISOString().split("T")[0];
-      const endDateStr = weekEnd.toISOString().split("T")[0];
+      // Just use the date portion to avoid any timezone/rounding issues
+      const endDate = new Date(weekEnd);
+      endDate.setHours(0, 0, 0, 0);
+      const endDateStr = endDate.toISOString().split("T")[0];
 
       console.log(
         `🔄 Reading GitHub activities from ${startDateStr} to ${endDateStr}`
@@ -108,7 +111,10 @@ class NotionClient {
   async getWorkoutsForWeek(weekStart, weekEnd) {
     try {
       const startDateStr = weekStart.toISOString().split("T")[0];
-      const endDateStr = weekEnd.toISOString().split("T")[0];
+      // Just use the date portion to avoid any timezone/rounding issues
+      const endDate = new Date(weekEnd);
+      endDate.setHours(0, 0, 0, 0);
+      const endDateStr = endDate.toISOString().split("T")[0];
 
       console.log(`🔄 Reading workouts from ${startDateStr} to ${endDateStr}`);
 
@@ -686,7 +692,7 @@ async function syncWorkouts(
       await notion.markWorkoutCalendarCreated(workout.id);
       createdCount++;
       console.log(
-        `✅ Synced: ${workout.activityName} (${workout.activityType})`
+        `✅ Synced: ${workout.activityName} (${workout.activityType}) - ${workout.date}`
       );
     } catch (error) {
       console.error(
