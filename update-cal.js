@@ -5,6 +5,7 @@ const {
   getDateSelection,
   closeReadline,
   askQuestion,
+  generateWeekSummary,
 } = require("./lib/cli-utils.js");
 require("dotenv").config();
 
@@ -177,7 +178,12 @@ class NotionClient {
   async getSleepForWeek(weekStart, weekEnd) {
     try {
       const startDateStr = weekStart.toISOString().split("T")[0];
-      const endDateStr = weekEnd.toISOString().split("T")[0];
+      // Just use the date portion to avoid any timezone/rounding issues
+      const endDate = new Date(weekEnd);
+      endDate.setHours(0, 0, 0, 0);
+      const endDateStr = endDate.toISOString().split("T")[0];
+
+      console.log(`DEBUG: endDateStr = ${endDateStr}`);
 
       console.log(
         `🔄 Reading sleep records from ${startDateStr} to ${endDateStr}`
@@ -207,6 +213,7 @@ class NotionClient {
       console.log(
         `📊 Found ${response.results.length} sleep sessions without calendar events`
       );
+
       return this.transformNotionToSleep(response.results);
     } catch (error) {
       console.error("❌ Error reading sleep records:", error.message);
@@ -496,7 +503,13 @@ class CalendarClient {
   }
 }
 
-async function syncGitHubWork(weekStart, weekEnd, selectedDate, optionInput) {
+async function syncGitHubWork(
+  weekStart,
+  weekEnd,
+  selectedDate,
+  optionInput,
+  dateRangeLabel
+) {
   console.log("💼 GitHub Work Sync\n");
 
   const notion = new NotionClient();
@@ -551,13 +564,23 @@ async function syncGitHubWork(weekStart, weekEnd, selectedDate, optionInput) {
   console.log(
     `\n✅ Successfully synced ${createdCount} work GitHub activities!`
   );
+
+  // Add week summary
+  const summary = generateWeekSummary(
+    weekStart,
+    weekEnd,
+    dateRangeLabel,
+    optionInput
+  );
+  console.log(`\n${summary}`);
 }
 
 async function syncGitHubPersonal(
   weekStart,
   weekEnd,
   selectedDate,
-  optionInput
+  optionInput,
+  dateRangeLabel
 ) {
   console.log("💻 GitHub Personal Sync\n");
 
@@ -611,9 +634,24 @@ async function syncGitHubPersonal(
   }
 
   console.log(`\n✅ Successfully synced ${createdCount} GitHub activities!`);
+
+  // Add week summary
+  const summary = generateWeekSummary(
+    weekStart,
+    weekEnd,
+    dateRangeLabel,
+    optionInput
+  );
+  console.log(`\n${summary}`);
 }
 
-async function syncWorkouts(weekStart, weekEnd, selectedDate, optionInput) {
+async function syncWorkouts(
+  weekStart,
+  weekEnd,
+  selectedDate,
+  optionInput,
+  dateRangeLabel
+) {
   console.log("💪 Workout Sync\n");
 
   const notion = new NotionClient();
@@ -659,9 +697,24 @@ async function syncWorkouts(weekStart, weekEnd, selectedDate, optionInput) {
   }
 
   console.log(`\n✅ Successfully synced ${createdCount} workouts!`);
+
+  // Add week summary
+  const summary = generateWeekSummary(
+    weekStart,
+    weekEnd,
+    dateRangeLabel,
+    optionInput
+  );
+  console.log(`\n${summary}`);
 }
 
-async function syncSleep(weekStart, weekEnd, selectedDate, optionInput) {
+async function syncSleep(
+  weekStart,
+  weekEnd,
+  selectedDate,
+  optionInput,
+  dateRangeLabel
+) {
   console.log("😴 Sleep Sync\n");
 
   const notion = new NotionClient();
@@ -702,6 +755,15 @@ async function syncSleep(weekStart, weekEnd, selectedDate, optionInput) {
   }
 
   console.log(`\n✅ Successfully synced ${createdCount} sleep records!`);
+
+  // Add week summary
+  const summary = generateWeekSummary(
+    weekStart,
+    weekEnd,
+    dateRangeLabel,
+    optionInput
+  );
+  console.log(`\n${summary}`);
 }
 
 // Main execution
@@ -771,26 +833,74 @@ async function main() {
 
   switch (choice) {
     case "1":
-      await syncGitHubPersonal(weekStart, weekEnd, selectedDate, optionInput);
+      await syncGitHubPersonal(
+        weekStart,
+        weekEnd,
+        selectedDate,
+        optionInput,
+        dateRangeLabel
+      );
       break;
     case "2":
-      await syncGitHubWork(weekStart, weekEnd, selectedDate, optionInput);
+      await syncGitHubWork(
+        weekStart,
+        weekEnd,
+        selectedDate,
+        optionInput,
+        dateRangeLabel
+      );
       break;
     case "3":
-      await syncWorkouts(weekStart, weekEnd, selectedDate, optionInput);
+      await syncWorkouts(
+        weekStart,
+        weekEnd,
+        selectedDate,
+        optionInput,
+        dateRangeLabel
+      );
       break;
     case "4":
-      await syncSleep(weekStart, weekEnd, selectedDate, optionInput);
+      await syncSleep(
+        weekStart,
+        weekEnd,
+        selectedDate,
+        optionInput,
+        dateRangeLabel
+      );
       break;
     case "5":
       console.log("🔄 Running all syncs...\n");
-      await syncGitHubPersonal(weekStart, weekEnd, selectedDate, optionInput);
+      await syncGitHubPersonal(
+        weekStart,
+        weekEnd,
+        selectedDate,
+        optionInput,
+        dateRangeLabel
+      );
       console.log("\n" + "=".repeat(50) + "\n");
-      await syncGitHubWork(weekStart, weekEnd, selectedDate, optionInput);
+      await syncGitHubWork(
+        weekStart,
+        weekEnd,
+        selectedDate,
+        optionInput,
+        dateRangeLabel
+      );
       console.log("\n" + "=".repeat(50) + "\n");
-      await syncWorkouts(weekStart, weekEnd, selectedDate, optionInput);
+      await syncWorkouts(
+        weekStart,
+        weekEnd,
+        selectedDate,
+        optionInput,
+        dateRangeLabel
+      );
       console.log("\n" + "=".repeat(50) + "\n");
-      await syncSleep(weekStart, weekEnd, selectedDate, optionInput);
+      await syncSleep(
+        weekStart,
+        weekEnd,
+        selectedDate,
+        optionInput,
+        dateRangeLabel
+      );
       break;
     default:
       console.log("❌ Invalid choice. Please run again and choose 1-5.");
