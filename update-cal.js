@@ -189,8 +189,6 @@ class NotionClient {
       endDate.setHours(0, 0, 0, 0);
       const endDateStr = endDate.toISOString().split("T")[0];
 
-      console.log(`DEBUG: endDateStr = ${endDateStr}`);
-
       console.log(
         `🔄 Reading sleep records from ${startDateStr} to ${endDateStr}`
       );
@@ -514,7 +512,8 @@ async function syncGitHubWork(
   weekEnd,
   selectedDate,
   optionInput,
-  dateRangeLabel
+  dateRangeLabel,
+  dryRun = false
 ) {
   console.log("💼 GitHub Work Sync\n");
 
@@ -556,19 +555,32 @@ async function syncGitHubWork(
   let createdCount = 0;
   for (const activity of workActivities) {
     try {
-      await calendar.createWorkGitHubEvent(activity);
-      await notion.markCalendarCreated(activity.id);
-      createdCount++;
-      console.log(
-        `✅ Synced: ${activity.repository} (${activity.commitsCount} commits)`
-      );
+      if (dryRun) {
+        // In dry run mode, just show what would be created
+        const title = calendar.formatGitHubEventTitle(activity);
+        console.log(
+          `🧪 Would create: ${title} for ${activity.repository} (${activity.commitsCount} commits)`
+        );
+        createdCount++;
+      } else {
+        // Normal mode - actually create the event
+        await calendar.createWorkGitHubEvent(activity);
+        await notion.markCalendarCreated(activity.id);
+        createdCount++;
+        console.log(
+          `✅ Synced: ${activity.repository} (${activity.commitsCount} commits)`
+        );
+      }
     } catch (error) {
       console.error(`❌ Failed to sync ${activity.repository}:`, error.message);
     }
   }
 
+  const actionText = dryRun ? "Would sync" : "Successfully synced";
   console.log(
-    `\n✅ Successfully synced ${createdCount} work GitHub activities!`
+    `\n${
+      dryRun ? "🧪" : "✅"
+    } ${actionText} ${createdCount} work GitHub activities!`
   );
 
   // Add week summary
@@ -586,7 +598,8 @@ async function syncGitHubPersonal(
   weekEnd,
   selectedDate,
   optionInput,
-  dateRangeLabel
+  dateRangeLabel,
+  dryRun = false
 ) {
   console.log("💻 GitHub Personal Sync\n");
 
@@ -628,18 +641,31 @@ async function syncGitHubPersonal(
   let createdCount = 0;
   for (const activity of personalActivities) {
     try {
-      await calendar.createGitHubEvent(activity);
-      await notion.markCalendarCreated(activity.id);
-      createdCount++;
-      console.log(
-        `✅ Synced: ${activity.repository} (${activity.commitsCount} commits)`
-      );
+      if (dryRun) {
+        // In dry run mode, just show what would be created
+        const title = calendar.formatGitHubEventTitle(activity);
+        console.log(
+          `🧪 Would create: ${title} for ${activity.repository} (${activity.commitsCount} commits)`
+        );
+        createdCount++;
+      } else {
+        // Normal mode - actually create the event
+        await calendar.createGitHubEvent(activity);
+        await notion.markCalendarCreated(activity.id);
+        createdCount++;
+        console.log(
+          `✅ Synced: ${activity.repository} (${activity.commitsCount} commits)`
+        );
+      }
     } catch (error) {
       console.error(`❌ Failed to sync ${activity.repository}:`, error.message);
     }
   }
 
-  console.log(`\n✅ Successfully synced ${createdCount} GitHub activities!`);
+  const actionText = dryRun ? "Would sync" : "Successfully synced";
+  console.log(
+    `\n${dryRun ? "🧪" : "✅"} ${actionText} ${createdCount} GitHub activities!`
+  );
 
   // Add week summary
   const summary = generateWeekSummary(
@@ -656,7 +682,8 @@ async function syncWorkouts(
   weekEnd,
   selectedDate,
   optionInput,
-  dateRangeLabel
+  dateRangeLabel,
+  dryRun = false
 ) {
   console.log("💪 Workout Sync\n");
 
@@ -688,12 +715,22 @@ async function syncWorkouts(
   let createdCount = 0;
   for (const workout of workouts) {
     try {
-      await calendar.createWorkoutEvent(workout);
-      await notion.markWorkoutCalendarCreated(workout.id);
-      createdCount++;
-      console.log(
-        `✅ Synced: ${workout.activityName} (${workout.activityType}) - ${workout.date}`
-      );
+      if (dryRun) {
+        // In dry run mode, just show what would be created
+        const title = calendar.formatWorkoutEventTitle(workout);
+        console.log(
+          `🧪 Would create: ${title} for ${workout.activityName} (${workout.activityType}) - ${workout.date}`
+        );
+        createdCount++;
+      } else {
+        // Normal mode - actually create the event
+        await calendar.createWorkoutEvent(workout);
+        await notion.markWorkoutCalendarCreated(workout.id);
+        createdCount++;
+        console.log(
+          `✅ Synced: ${workout.activityName} (${workout.activityType}) - ${workout.date}`
+        );
+      }
     } catch (error) {
       console.error(
         `❌ Failed to sync ${workout.activityName}:`,
@@ -702,7 +739,10 @@ async function syncWorkouts(
     }
   }
 
-  console.log(`\n✅ Successfully synced ${createdCount} workouts!`);
+  const actionText = dryRun ? "Would sync" : "Successfully synced";
+  console.log(
+    `\n${dryRun ? "🧪" : "✅"} ${actionText} ${createdCount} workouts!`
+  );
 
   // Add week summary
   const summary = generateWeekSummary(
@@ -719,7 +759,8 @@ async function syncSleep(
   weekEnd,
   selectedDate,
   optionInput,
-  dateRangeLabel
+  dateRangeLabel,
+  dryRun = false
 ) {
   console.log("😴 Sleep Sync\n");
 
@@ -749,18 +790,31 @@ async function syncSleep(
   let createdCount = 0;
   for (const sleepRecord of sleepRecords) {
     try {
-      await calendar.createSleepEvent(sleepRecord);
-      await notion.markSleepCalendarCreated(sleepRecord.id);
-      createdCount++;
-      console.log(
-        `✅ Synced: ${sleepRecord.nightOf} (${sleepRecord.sleepDuration}hrs)`
-      );
+      if (dryRun) {
+        // In dry run mode, just show what would be created
+        const title = calendar.formatSleepEventTitle(sleepRecord);
+        console.log(
+          `🧪 Would create: ${title} for ${sleepRecord.nightOf} (${sleepRecord.sleepDuration}hrs)`
+        );
+        createdCount++;
+      } else {
+        // Normal mode - actually create the event
+        await calendar.createSleepEvent(sleepRecord);
+        await notion.markSleepCalendarCreated(sleepRecord.id);
+        createdCount++;
+        console.log(
+          `✅ Synced: ${sleepRecord.nightOf} (${sleepRecord.sleepDuration}hrs)`
+        );
+      }
     } catch (error) {
       console.error(`❌ Failed to sync ${sleepRecord.nightOf}:`, error.message);
     }
   }
 
-  console.log(`\n✅ Successfully synced ${createdCount} sleep records!`);
+  const actionText = dryRun ? "Would sync" : "Successfully synced";
+  console.log(
+    `\n${dryRun ? "🧪" : "✅"} ${actionText} ${createdCount} sleep records!`
+  );
 
   // Add week summary
   const summary = generateWeekSummary(
@@ -774,6 +828,13 @@ async function syncSleep(
 
 // Main execution
 async function main() {
+  // Check for dry run flag
+  const dryRun = process.argv.includes("--dry-run");
+
+  if (dryRun) {
+    console.log("🧪 DRY RUN MODE - No calendar events will be created\n");
+  }
+
   console.log("🔄 Calendar Sync App\n");
   console.log("Available syncs:");
   console.log("1. GitHub Personal");
@@ -817,9 +878,17 @@ async function main() {
   };
   console.log(`🔄 Sync type: ${syncTypes[choice]}`);
 
-  const confirm = await askQuestion(
-    "\n? Proceed with creating calendar events for this period? (y/n): "
-  );
+  if (dryRun) {
+    console.log(
+      `🧪 DRY RUN: Will preview what would be synced (no actual changes)`
+    );
+  }
+
+  const confirmMessage = dryRun
+    ? "\n? Proceed with previewing calendar events for this period? (y/n): "
+    : "\n? Proceed with creating calendar events for this period? (y/n): ";
+
+  const confirm = await askQuestion(confirmMessage);
 
   if (confirm.toLowerCase() !== "y" && confirm.toLowerCase() !== "yes") {
     console.log("❌ Operation cancelled.");
@@ -844,7 +913,8 @@ async function main() {
         weekEnd,
         selectedDate,
         optionInput,
-        dateRangeLabel
+        dateRangeLabel,
+        dryRun
       );
       break;
     case "2":
@@ -853,7 +923,8 @@ async function main() {
         weekEnd,
         selectedDate,
         optionInput,
-        dateRangeLabel
+        dateRangeLabel,
+        dryRun
       );
       break;
     case "3":
@@ -862,7 +933,8 @@ async function main() {
         weekEnd,
         selectedDate,
         optionInput,
-        dateRangeLabel
+        dateRangeLabel,
+        dryRun
       );
       break;
     case "4":
@@ -871,7 +943,8 @@ async function main() {
         weekEnd,
         selectedDate,
         optionInput,
-        dateRangeLabel
+        dateRangeLabel,
+        dryRun
       );
       break;
     case "5":
@@ -881,7 +954,8 @@ async function main() {
         weekEnd,
         selectedDate,
         optionInput,
-        dateRangeLabel
+        dateRangeLabel,
+        dryRun
       );
       console.log("\n" + "=".repeat(50) + "\n");
       await syncGitHubWork(
@@ -889,7 +963,8 @@ async function main() {
         weekEnd,
         selectedDate,
         optionInput,
-        dateRangeLabel
+        dateRangeLabel,
+        dryRun
       );
       console.log("\n" + "=".repeat(50) + "\n");
       await syncWorkouts(
@@ -897,7 +972,8 @@ async function main() {
         weekEnd,
         selectedDate,
         optionInput,
-        dateRangeLabel
+        dateRangeLabel,
+        dryRun
       );
       console.log("\n" + "=".repeat(50) + "\n");
       await syncSleep(
@@ -905,7 +981,8 @@ async function main() {
         weekEnd,
         selectedDate,
         optionInput,
-        dateRangeLabel
+        dateRangeLabel,
+        dryRun
       );
       break;
     default:
