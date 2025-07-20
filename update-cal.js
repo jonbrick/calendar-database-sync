@@ -15,6 +15,7 @@ class NotionClient {
     this.prsDbId = process.env.NOTION_PRS_DATABASE_ID;
     this.workoutsDbId = process.env.NOTION_WORKOUTS_DATABASE_ID;
     this.sleepDbId = process.env.NOTION_SLEEP_DATABASE_ID;
+    this.bodyWeightDbId = process.env.NOTION_BODY_WEIGHT_DATABASE_ID;
   }
 
   async testConnection() {
@@ -256,6 +257,80 @@ class NotionClient {
       console.error("❌ Error marking sleep calendar created:", error.message);
     }
   }
+
+  async getBodyWeightForWeek(weekStart, weekEnd) {
+    try {
+      const startDateStr = weekStart.toISOString().split("T")[0];
+      // Just use the date portion to avoid any timezone/rounding issues
+      const endDate = new Date(weekEnd);
+      endDate.setHours(0, 0, 0, 0);
+      const endDateStr = endDate.toISOString().split("T")[0];
+
+      console.log(
+        `🔄 Reading body weight records from ${startDateStr} to ${endDateStr}`
+      );
+
+      const response = await this.notion.databases.query({
+        database_id: this.bodyWeightDbId,
+        filter: {
+          and: [
+            {
+              property: "Date",
+              date: { on_or_after: startDateStr },
+            },
+            {
+              property: "Date",
+              date: { on_or_before: endDateStr },
+            },
+            {
+              property: "Calendar Created",
+              checkbox: { equals: false },
+            },
+          ],
+        },
+        sorts: [{ property: "Date", direction: "ascending" }],
+      });
+
+      console.log(
+        `📊 Found ${response.results.length} body weight records without calendar events`
+      );
+
+      return this.transformNotionToBodyWeight(response.results);
+    } catch (error) {
+      console.error("❌ Error reading body weight records:", error.message);
+      return [];
+    }
+  }
+
+  transformNotionToBodyWeight(notionPages) {
+    return notionPages.map((page) => {
+      const props = page.properties;
+      return {
+        id: page.id,
+        date: props["Date"]?.date?.start,
+        weight: props["Weight"]?.number || 0,
+        weightUnit: props["Weight Unit"]?.select?.name || "lbs",
+        measurementTime: props["Time"]?.rich_text?.[0]?.plain_text || "",
+        notes: props["Notes"]?.rich_text?.[0]?.plain_text || "",
+      };
+    });
+  }
+
+  async markBodyWeightCalendarCreated(bodyWeightId) {
+    try {
+      await this.notion.pages.update({
+        page_id: bodyWeightId,
+        properties: {
+          "Calendar Created": { checkbox: true },
+        },
+      });
+    } catch (error) {
+      console.error(
+        "❌ Error marking body weight calendar created:",
+        error.message
+      );
+    }
+  }
 }
 
 class CalendarClient {
@@ -291,6 +366,7 @@ class CalendarClient {
     this.fitnessCalendarId = process.env.FITNESS_CALENDAR_ID;
     this.normalWakeUpCalendarId = process.env.NORMAL_WAKE_UP_CALENDAR_ID;
     this.sleepInCalendarId = process.env.SLEEP_IN_CALENDAR_ID;
+    this.bodyWeightCalendarId = process.env.BODY_WEIGHT_CALENDAR_ID;
   }
 
   async testConnection() {
@@ -503,6 +579,57 @@ class CalendarClient {
     description += `• REM Sleep: ${sleepRecord.remSleep} min\n`;
     description += `• Light Sleep: ${sleepRecord.lightSleep} min\n\n`;
 
+    return description;
+  }
+
+  async createBodyWeightEvent(bodyWeightRecord) {
+    try {
+      // Create all-day event for body weight
+      const eventDate = bodyWeightRecord.date; // YYYY-MM-DD format
+      const title = this.formatBodyWeightEventTitle(bodyWeightRecord);
+      const description =
+        this.formatBodyWeightEventDescription(bodyWeightRecord);
+
+      const event = {
+        summary: title,
+        description: description,
+        start: { date: eventDate },
+        end: { date: eventDate },
+      };
+
+      const response = await this.personalCalendar.events.insert({
+        calendarId: this.bodyWeightCalendarId,
+        resource: event,
+      });
+
+      console.log(`✅ Created body weight calendar event: ${title}`);
+      return response;
+    } catch (error) {
+      console.error(
+        "❌ Error creating body weight calendar event:",
+        error.message
+      );
+      throw error;
+    }
+  }
+
+  formatBodyWeightEventTitle(bodyWeightRecord) {
+    return `Weight: ${bodyWeightRecord.weight} ${bodyWeightRecord.weightUnit}`;
+  }
+
+  formatBodyWeightEventDescription(bodyWeightRecord) {
+    let description = `⚖️ Body Weight Measurement\n`;
+    description += `📊 Weight: ${bodyWeightRecord.weight} ${bodyWeightRecord.weightUnit}\n`;
+
+    if (bodyWeightRecord.measurementTime) {
+      description += `⏰ Time: ${bodyWeightRecord.measurementTime}\n`;
+    }
+
+    if (bodyWeightRecord.notes && bodyWeightRecord.notes.trim()) {
+      description += `📝 Notes: ${bodyWeightRecord.notes}\n`;
+    }
+
+    description += `🔗 Source: Withings`;
     return description;
   }
 }
@@ -826,6 +953,88 @@ async function syncSleep(
   console.log(`\n${summary}`);
 }
 
+async function syncBodyWeight(
+  weekStart,
+  weekEnd,
+  selectedDate,
+  optionInput,
+  dateRangeLabel,
+  dryRun = false
+) {
+  console.log("⚖️ Body Weight Sync\n");
+
+  const notion = new NotionClient();
+  const calendar = new CalendarClient();
+
+  // Test connections
+  await testConnections({ notion, calendar });
+
+  if (optionInput === "1") {
+    console.log(
+      `\n📊 Syncing body weight records for Date ${selectedDate.toDateString()}`
+    );
+  } else {
+    console.log(
+      `\n📊 Syncing body weight records from ${weekStart.toDateString()} to ${weekEnd.toDateString()}`
+    );
+  }
+
+  const bodyWeightRecords = await notion.getBodyWeightForWeek(
+    weekStart,
+    weekEnd
+  );
+
+  if (bodyWeightRecords.length === 0) {
+    console.log("📭 No body weight records found without calendar events");
+    return;
+  }
+
+  console.log(
+    `🔍 Found ${bodyWeightRecords.length} body weight records to sync`
+  );
+
+  let createdCount = 0;
+  for (const bodyWeightRecord of bodyWeightRecords) {
+    try {
+      if (dryRun) {
+        // In dry run mode, just show what would be created
+        const title = calendar.formatBodyWeightEventTitle(bodyWeightRecord);
+        console.log(`🧪 Would create: ${title} for ${bodyWeightRecord.date}`);
+        createdCount++;
+      } else {
+        // Normal mode - actually create the event
+        await calendar.createBodyWeightEvent(bodyWeightRecord);
+        await notion.markBodyWeightCalendarCreated(bodyWeightRecord.id);
+        createdCount++;
+        console.log(
+          `✅ Synced: Weight ${bodyWeightRecord.weight} ${bodyWeightRecord.weightUnit} - ${bodyWeightRecord.date}`
+        );
+      }
+    } catch (error) {
+      console.error(
+        `❌ Failed to sync body weight record for ${bodyWeightRecord.date}:`,
+        error.message
+      );
+    }
+  }
+
+  const actionText = dryRun ? "Would sync" : "Successfully synced";
+  console.log(
+    `\n${
+      dryRun ? "🧪" : "✅"
+    } ${actionText} ${createdCount} body weight records!`
+  );
+
+  // Add week summary
+  const summary = generateWeekSummary(
+    weekStart,
+    weekEnd,
+    dateRangeLabel,
+    optionInput
+  );
+  console.log(`\n${summary}`);
+}
+
 // Main execution
 async function main() {
   // Check for dry run flag
@@ -837,13 +1046,16 @@ async function main() {
 
   console.log("🔄 Calendar Sync App\n");
   console.log("Available syncs:");
-  console.log("1. GitHub Personal");
-  console.log("2. GitHub Work");
-  console.log("3. Workouts");
-  console.log("4. Sleep");
-  console.log("5. All (GitHub Personal + GitHub Work + Workouts + Sleep)");
+  console.log("1. GitHub Personal (PRs)");
+  console.log("2. GitHub Work (PRs)");
+  console.log("3. Oura (Sleep)");
+  console.log("4. Strava (Workouts)");
+  console.log("5. Withings (Body weight)");
+  console.log(
+    "6. All (GitHub Personal + GitHub Work + Oura + Strava + Withings)"
+  );
 
-  const choice = await askQuestion("\n? Choose sync type (1-5): ");
+  const choice = await askQuestion("\n? Choose sync type (1-6): ");
 
   // Get date selection using the unified CLI utilities
   const { weekStart, weekEnd, dateRangeLabel, selectedDate, optionInput } =
@@ -870,11 +1082,12 @@ async function main() {
 
   // Show which sync type will run
   const syncTypes = {
-    1: "GitHub Personal",
-    2: "GitHub Work",
-    3: "Workouts",
-    4: "Sleep",
-    5: "All (GitHub Personal + GitHub Work + Workouts + Sleep)",
+    1: "GitHub Personal (PRs)",
+    2: "GitHub Work (PRs)",
+    3: "Oura (Sleep)",
+    4: "Strava (Workouts)",
+    5: "Withings (Body weight)",
+    6: "All (GitHub Personal + GitHub Work + Oura + Strava + Withings)",
   };
   console.log(`🔄 Sync type: ${syncTypes[choice]}`);
 
@@ -928,16 +1141,6 @@ async function main() {
       );
       break;
     case "3":
-      await syncWorkouts(
-        weekStart,
-        weekEnd,
-        selectedDate,
-        optionInput,
-        dateRangeLabel,
-        dryRun
-      );
-      break;
-    case "4":
       await syncSleep(
         weekStart,
         weekEnd,
@@ -947,7 +1150,27 @@ async function main() {
         dryRun
       );
       break;
+    case "4":
+      await syncWorkouts(
+        weekStart,
+        weekEnd,
+        selectedDate,
+        optionInput,
+        dateRangeLabel,
+        dryRun
+      );
+      break;
     case "5":
+      await syncBodyWeight(
+        weekStart,
+        weekEnd,
+        selectedDate,
+        optionInput,
+        dateRangeLabel,
+        dryRun
+      );
+      break;
+    case "6":
       console.log("🔄 Running all syncs...\n");
       await syncGitHubPersonal(
         weekStart,
@@ -967,6 +1190,15 @@ async function main() {
         dryRun
       );
       console.log("\n" + "=".repeat(50) + "\n");
+      await syncSleep(
+        weekStart,
+        weekEnd,
+        selectedDate,
+        optionInput,
+        dateRangeLabel,
+        dryRun
+      );
+      console.log("\n" + "=".repeat(50) + "\n");
       await syncWorkouts(
         weekStart,
         weekEnd,
@@ -976,7 +1208,7 @@ async function main() {
         dryRun
       );
       console.log("\n" + "=".repeat(50) + "\n");
-      await syncSleep(
+      await syncBodyWeight(
         weekStart,
         weekEnd,
         selectedDate,
@@ -986,7 +1218,7 @@ async function main() {
       );
       break;
     default:
-      console.log("❌ Invalid choice. Please run again and choose 1-5.");
+      console.log("❌ Invalid choice. Please run again and choose 1-6.");
   }
 }
 
