@@ -24,8 +24,13 @@ async function setupOAuth(accountType) {
     `Enter your ${accountType} Google Client Secret: `
   );
 
-  // Create OAuth2 client
-  const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
+  // Create OAuth2 client with redirect URI
+  const redirectUri = "urn:ietf:wg:oauth:2.0:oob"; // Out-of-band URI for desktop apps
+  const oauth2Client = new google.auth.OAuth2(
+    clientId,
+    clientSecret,
+    redirectUri
+  );
 
   // Generate authorization URL
   const scopes = [

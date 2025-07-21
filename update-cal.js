@@ -410,9 +410,12 @@ class NotionClient {
 
 class CalendarClient {
   constructor() {
+    const redirectUri = "urn:ietf:wg:oauth:2.0:oob"; // Out-of-band URI for desktop apps
+
     this.personalAuth = new google.auth.OAuth2(
       process.env.PERSONAL_GOOGLE_CLIENT_ID,
-      process.env.PERSONAL_GOOGLE_CLIENT_SECRET
+      process.env.PERSONAL_GOOGLE_CLIENT_SECRET,
+      redirectUri
     );
     this.personalAuth.setCredentials({
       refresh_token: process.env.PERSONAL_GOOGLE_REFRESH_TOKEN,
@@ -421,7 +424,8 @@ class CalendarClient {
     // Work account auth
     this.workAuth = new google.auth.OAuth2(
       process.env.WORK_GOOGLE_CLIENT_ID,
-      process.env.WORK_GOOGLE_CLIENT_SECRET
+      process.env.WORK_GOOGLE_CLIENT_SECRET,
+      redirectUri
     );
     this.workAuth.setCredentials({
       refresh_token: process.env.WORK_GOOGLE_REFRESH_TOKEN,
