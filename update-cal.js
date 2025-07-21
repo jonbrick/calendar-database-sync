@@ -16,6 +16,7 @@ class NotionClient {
     this.workoutsDbId = process.env.NOTION_WORKOUTS_DATABASE_ID;
     this.sleepDbId = process.env.NOTION_SLEEP_DATABASE_ID;
     this.bodyWeightDbId = process.env.NOTION_BODY_WEIGHT_DATABASE_ID;
+    this.videoGamesDbId = process.env.NOTION_VIDEO_GAMES_DATABASE_ID;
   }
 
   async testConnection() {
@@ -331,6 +332,80 @@ class NotionClient {
       );
     }
   }
+
+  async getVideoGamesForWeek(weekStart, weekEnd) {
+    try {
+      const startDateStr = weekStart.toISOString().split("T")[0];
+      const endDate = new Date(weekEnd);
+      endDate.setHours(0, 0, 0, 0);
+      const endDateStr = endDate.toISOString().split("T")[0];
+
+      console.log(
+        `🔄 Reading video game sessions from ${startDateStr} to ${endDateStr}`
+      );
+
+      const response = await this.notion.databases.query({
+        database_id: this.videoGamesDbId,
+        filter: {
+          and: [
+            { property: "Date", date: { on_or_after: startDateStr } },
+            { property: "Date", date: { on_or_before: endDateStr } },
+            { property: "Calendar Created", checkbox: { equals: false } },
+          ],
+        },
+        sorts: [{ property: "Date", direction: "ascending" }],
+      });
+
+      console.log(
+        `📊 Found ${response.results.length} gaming sessions without calendar events`
+      );
+      return this.transformNotionToVideoGames(response.results);
+    } catch (error) {
+      console.error("❌ Error reading video game sessions:", error.message);
+      return [];
+    }
+  }
+
+  transformNotionToVideoGames(notionPages) {
+    return notionPages.map((page) => {
+      const props = page.properties;
+      const hoursPlayed = props["Hours Played"]?.number || 0;
+      const minutesPlayed = props["Minutes Played"]?.number || 0;
+      const totalMinutes = hoursPlayed * 60 + minutesPlayed;
+
+      return {
+        id: page.id,
+        gameName: props["Game Name"]?.title?.[0]?.plain_text || "Unknown Game",
+        date: props["Date"]?.date?.start,
+        hoursPlayed: hoursPlayed,
+        minutesPlayed: minutesPlayed,
+        totalMinutes: totalMinutes,
+        sessionCount: props["Session Count"]?.number || 1,
+        sessionDetails:
+          props["Session Details"]?.rich_text?.[0]?.plain_text || "",
+        startTime: props["Start Time"]?.rich_text?.[0]?.plain_text || "",
+        endTime: props["End Time"]?.rich_text?.[0]?.plain_text || "",
+        platform: props["Platform"]?.select?.name || "Steam",
+        activityId: props["Activity ID"]?.rich_text?.[0]?.plain_text || "",
+      };
+    });
+  }
+
+  async markVideoGameCalendarCreated(gameSessionId) {
+    try {
+      await this.notion.pages.update({
+        page_id: gameSessionId,
+        properties: {
+          "Calendar Created": { checkbox: true },
+        },
+      });
+    } catch (error) {
+      console.error(
+        "❌ Error marking video game calendar created:",
+        error.message
+      );
+    }
+  }
 }
 
 class CalendarClient {
@@ -367,6 +442,7 @@ class CalendarClient {
     this.normalWakeUpCalendarId = process.env.NORMAL_WAKE_UP_CALENDAR_ID;
     this.sleepInCalendarId = process.env.SLEEP_IN_CALENDAR_ID;
     this.bodyWeightCalendarId = process.env.BODY_WEIGHT_CALENDAR_ID;
+    this.videoGamesCalendarId = process.env.VIDEO_GAMES_CALENDAR_ID;
   }
 
   async testConnection() {
@@ -630,6 +706,87 @@ class CalendarClient {
     }
 
     description += `🔗 Source: Withings`;
+    return description;
+  }
+
+  async createVideoGameEvent(gameSession) {
+    try {
+      // Parse start and end times
+      let startDateTime, endDateTime;
+
+      if (gameSession.startTime && gameSession.endTime) {
+        // Check if times are already full ISO strings (contain 'T')
+        if (
+          gameSession.startTime.includes("T") &&
+          gameSession.endTime.includes("T")
+        ) {
+          // They're already full datetime strings, use them directly
+          startDateTime = new Date(gameSession.startTime);
+          endDateTime = new Date(gameSession.endTime);
+        } else {
+          // They're just time portions, concatenate with date
+          startDateTime = new Date(
+            `${gameSession.date}T${gameSession.startTime}`
+          );
+          endDateTime = new Date(`${gameSession.date}T${gameSession.endTime}`);
+        }
+      } else {
+        // Fallback: create event based on date and duration
+        startDateTime = new Date(`${gameSession.date}T19:00:00`); // Default 7 PM
+        endDateTime = new Date(
+          startDateTime.getTime() + gameSession.totalMinutes * 60 * 1000
+        );
+      }
+
+      const title = this.formatVideoGameEventTitle(gameSession);
+      const description = this.formatVideoGameEventDescription(gameSession);
+
+      const event = {
+        summary: title,
+        description: description,
+        start: { dateTime: startDateTime.toISOString() },
+        end: { dateTime: endDateTime.toISOString() },
+      };
+
+      const response = await this.personalCalendar.events.insert({
+        calendarId: this.videoGamesCalendarId,
+        resource: event,
+      });
+
+      console.log(`✅ Created video game calendar event: ${title}`);
+      return response;
+    } catch (error) {
+      console.error(
+        "❌ Error creating video game calendar event:",
+        error.message
+      );
+      throw error;
+    }
+  }
+
+  formatVideoGameEventTitle(gameSession) {
+    const duration =
+      gameSession.hoursPlayed > 0
+        ? `${gameSession.hoursPlayed}h ${gameSession.minutesPlayed}m`
+        : `${gameSession.minutesPlayed}m`;
+
+    return `🎮 ${gameSession.gameName} - ${duration}`;
+  }
+
+  formatVideoGameEventDescription(gameSession) {
+    let description = `🎮 ${gameSession.gameName}\n`;
+    description += `⏱️ Duration: ${gameSession.hoursPlayed}h ${gameSession.minutesPlayed}m\n`;
+    description += `🎯 Sessions: ${gameSession.sessionCount}\n`;
+    description += `🖥️ Platform: ${gameSession.platform}\n`;
+
+    if (gameSession.sessionDetails && gameSession.sessionDetails.trim()) {
+      description += `\n📝 Session Details:\n${gameSession.sessionDetails}\n`;
+    }
+
+    if (gameSession.activityId) {
+      description += `\n🔗 Activity ID: ${gameSession.activityId}`;
+    }
+
     return description;
   }
 }
@@ -1035,6 +1192,128 @@ async function syncBodyWeight(
   console.log(`\n${summary}`);
 }
 
+async function syncVideoGames(
+  weekStart,
+  weekEnd,
+  selectedDate,
+  optionInput,
+  dateRangeLabel,
+  dryRun = false
+) {
+  console.log("🎮 Steam (Video Games) Sync\n");
+
+  const notion = new NotionClient();
+  const calendar = new CalendarClient();
+
+  // Test connections
+  await testConnections({ notion, calendar });
+
+  if (optionInput === "1") {
+    console.log(
+      `\n📊 Syncing video game sessions for Date ${selectedDate.toDateString()}`
+    );
+  } else {
+    console.log(
+      `\n📊 Syncing video game sessions from ${weekStart.toDateString()} to ${weekEnd.toDateString()}`
+    );
+  }
+
+  const gameSessions = await notion.getVideoGamesForWeek(weekStart, weekEnd);
+
+  if (gameSessions.length === 0) {
+    console.log("📭 No video game sessions found without calendar events");
+    return;
+  }
+
+  console.log(`🔍 Found ${gameSessions.length} gaming sessions to sync`);
+
+  let createdCount = 0;
+  for (const gameSession of gameSessions) {
+    try {
+      if (dryRun) {
+        const title = calendar.formatVideoGameEventTitle(gameSession);
+        console.log(
+          `🧪 Would create: ${title} on ${gameSession.date} (${gameSession.startTime} - ${gameSession.endTime})`
+        );
+        createdCount++;
+      } else {
+        await calendar.createVideoGameEvent(gameSession);
+        await notion.markVideoGameCalendarCreated(gameSession.id);
+        createdCount++;
+        console.log(
+          `✅ Synced: ${gameSession.gameName} (${gameSession.hoursPlayed}h ${gameSession.minutesPlayed}m) - ${gameSession.date}`
+        );
+      }
+    } catch (error) {
+      console.error(
+        `❌ Failed to sync ${gameSession.gameName}:`,
+        error.message
+      );
+    }
+  }
+
+  const actionText = dryRun ? "Would sync" : "Successfully synced";
+  console.log(
+    `\n${dryRun ? "🧪" : "✅"} ${actionText} ${createdCount} gaming sessions!`
+  );
+
+  // Add week summary
+  const summary = generateWeekSummary(
+    weekStart,
+    weekEnd,
+    dateRangeLabel,
+    optionInput
+  );
+  console.log(`\n${summary}`);
+}
+
+// Helper function to execute sync for single or multiple weeks
+async function executeSyncForWeeks(
+  syncFunction,
+  isMultipleWeeks,
+  multipleWeeks,
+  weekStart,
+  weekEnd,
+  selectedDate,
+  optionInput,
+  dateRangeLabel,
+  dryRun
+) {
+  if (isMultipleWeeks) {
+    for (let i = 0; i < multipleWeeks.length; i++) {
+      const week = multipleWeeks[i];
+      console.log(`\n${"=".repeat(60)}`);
+      console.log(
+        `📅 Processing Week ${week.weekNumber} (${i + 1}/${
+          multipleWeeks.length
+        })`
+      );
+      console.log(
+        `   ${week.weekStart.toDateString()} - ${week.weekEnd.toDateString()}`
+      );
+      console.log(`${"=".repeat(60)}\n`);
+
+      await syncFunction(
+        week.weekStart,
+        week.weekEnd,
+        selectedDate,
+        optionInput,
+        week.dateRangeLabel,
+        dryRun
+      );
+    }
+  } else {
+    await syncFunction(
+      weekStart,
+      weekEnd,
+      selectedDate,
+      optionInput,
+      dateRangeLabel,
+      dryRun
+    );
+  }
+}
+
 // Main execution
 async function main() {
   // Check for dry run flag
@@ -1046,20 +1325,34 @@ async function main() {
 
   console.log("🔄 Calendar Sync App\n");
   console.log("Available syncs:");
-  console.log("1. GitHub Personal (PRs)");
-  console.log("2. GitHub Work (PRs)");
-  console.log("3. Oura (Sleep)");
-  console.log("4. Strava (Workouts)");
-  console.log("5. Withings (Body weight)");
   console.log(
-    "6. All (GitHub Personal + GitHub Work + Oura + Strava + Withings)"
+    "1. All (GitHub Personal + GitHub Work + Oura + Steam + Strava + Withings)"
   );
+  console.log("2. GitHub Personal (PRs)");
+  console.log("3. GitHub Work (PRs)");
+  console.log("4. Oura (Sleep)");
+  console.log("5. Steam (Video Games)");
+  console.log("6. Strava (Workouts)");
+  console.log("7. Withings (Body weight)");
 
-  const choice = await askQuestion("\n? Choose sync type (1-6): ");
+  const choice = await askQuestion("\n? Choose sync type (1-7): ");
 
   // Get date selection using the unified CLI utilities
-  const { weekStart, weekEnd, dateRangeLabel, selectedDate, optionInput } =
-    await getDateSelection();
+  const dateSelection = await getDateSelection();
+
+  // Handle multiple weeks scenario
+  let isMultipleWeeks = false;
+  let multipleWeeks = [];
+  let weekStart, weekEnd, dateRangeLabel, selectedDate, optionInput;
+
+  if (dateSelection.isMultipleWeeks) {
+    isMultipleWeeks = true;
+    multipleWeeks = dateSelection.multipleWeeks;
+    optionInput = dateSelection.optionInput;
+  } else {
+    ({ weekStart, weekEnd, dateRangeLabel, selectedDate, optionInput } =
+      dateSelection);
+  }
 
   // Confirmation step
   console.log("\n📋 Summary:");
@@ -1072,6 +1365,16 @@ async function main() {
         selectedDate.toISOString().split("T")[0]
       })`
     );
+  } else if (isMultipleWeeks) {
+    console.log(`📊 Multiple weeks operation`);
+    console.log(`📅 Weeks: ${dateSelection.weekNumbers.join(", ")}`);
+    multipleWeeks.forEach((week) => {
+      console.log(
+        `   Week ${
+          week.weekNumber
+        }: ${week.weekStart.toDateString()} - ${week.weekEnd.toDateString()}`
+      );
+    });
   } else {
     const totalDays = Math.ceil((weekEnd - weekStart) / (1000 * 60 * 60 * 24));
     console.log(`📊 Total days: ${totalDays} days`);
@@ -1082,12 +1385,13 @@ async function main() {
 
   // Show which sync type will run
   const syncTypes = {
-    1: "GitHub Personal (PRs)",
-    2: "GitHub Work (PRs)",
-    3: "Oura (Sleep)",
-    4: "Strava (Workouts)",
-    5: "Withings (Body weight)",
-    6: "All (GitHub Personal + GitHub Work + Oura + Strava + Withings)",
+    1: "All (GitHub Personal + GitHub Work + Oura + Steam + Strava + Withings)",
+    2: "GitHub Personal (PRs)",
+    3: "GitHub Work (PRs)",
+    4: "Oura (Sleep)",
+    5: "Steam (Video Games)",
+    6: "Strava (Workouts)",
+    7: "Withings (Body weight)",
   };
   console.log(`🔄 Sync type: ${syncTypes[choice]}`);
 
@@ -1111,7 +1415,17 @@ async function main() {
 
   closeReadline();
 
-  if (optionInput === "1") {
+  // For "All" sync, don't allow multiple weeks (too overwhelming)
+  if (choice === "1" && isMultipleWeeks) {
+    console.log(
+      "❌ Multiple weeks not supported for 'All' sync option. Please choose individual sync types for multiple weeks."
+    );
+    return;
+  }
+
+  if (isMultipleWeeks) {
+    console.log(`\n📊 Processing ${multipleWeeks.length} weeks...`);
+  } else if (optionInput === "1") {
     console.log(`\n📊 Processing ${dateRangeLabel}`);
   } else {
     console.log(
@@ -1121,56 +1435,6 @@ async function main() {
 
   switch (choice) {
     case "1":
-      await syncGitHubPersonal(
-        weekStart,
-        weekEnd,
-        selectedDate,
-        optionInput,
-        dateRangeLabel,
-        dryRun
-      );
-      break;
-    case "2":
-      await syncGitHubWork(
-        weekStart,
-        weekEnd,
-        selectedDate,
-        optionInput,
-        dateRangeLabel,
-        dryRun
-      );
-      break;
-    case "3":
-      await syncSleep(
-        weekStart,
-        weekEnd,
-        selectedDate,
-        optionInput,
-        dateRangeLabel,
-        dryRun
-      );
-      break;
-    case "4":
-      await syncWorkouts(
-        weekStart,
-        weekEnd,
-        selectedDate,
-        optionInput,
-        dateRangeLabel,
-        dryRun
-      );
-      break;
-    case "5":
-      await syncBodyWeight(
-        weekStart,
-        weekEnd,
-        selectedDate,
-        optionInput,
-        dateRangeLabel,
-        dryRun
-      );
-      break;
-    case "6":
       console.log("🔄 Running all syncs...\n");
       await syncGitHubPersonal(
         weekStart,
@@ -1199,6 +1463,15 @@ async function main() {
         dryRun
       );
       console.log("\n" + "=".repeat(50) + "\n");
+      await syncVideoGames(
+        weekStart,
+        weekEnd,
+        selectedDate,
+        optionInput,
+        dateRangeLabel,
+        dryRun
+      );
+      console.log("\n" + "=".repeat(50) + "\n");
       await syncWorkouts(
         weekStart,
         weekEnd,
@@ -1217,8 +1490,96 @@ async function main() {
         dryRun
       );
       break;
+    case "2":
+      await executeSyncForWeeks(
+        syncGitHubPersonal,
+        isMultipleWeeks,
+        multipleWeeks,
+        weekStart,
+        weekEnd,
+        selectedDate,
+        optionInput,
+        dateRangeLabel,
+        dryRun
+      );
+      break;
+    case "3":
+      await executeSyncForWeeks(
+        syncGitHubWork,
+        isMultipleWeeks,
+        multipleWeeks,
+        weekStart,
+        weekEnd,
+        selectedDate,
+        optionInput,
+        dateRangeLabel,
+        dryRun
+      );
+      break;
+    case "4":
+      await executeSyncForWeeks(
+        syncSleep,
+        isMultipleWeeks,
+        multipleWeeks,
+        weekStart,
+        weekEnd,
+        selectedDate,
+        optionInput,
+        dateRangeLabel,
+        dryRun
+      );
+      break;
+    case "5":
+      await executeSyncForWeeks(
+        syncVideoGames,
+        isMultipleWeeks,
+        multipleWeeks,
+        weekStart,
+        weekEnd,
+        selectedDate,
+        optionInput,
+        dateRangeLabel,
+        dryRun
+      );
+      break;
+    case "6":
+      await executeSyncForWeeks(
+        syncWorkouts,
+        isMultipleWeeks,
+        multipleWeeks,
+        weekStart,
+        weekEnd,
+        selectedDate,
+        optionInput,
+        dateRangeLabel,
+        dryRun
+      );
+      break;
+    case "7":
+      await executeSyncForWeeks(
+        syncBodyWeight,
+        isMultipleWeeks,
+        multipleWeeks,
+        weekStart,
+        weekEnd,
+        selectedDate,
+        optionInput,
+        dateRangeLabel,
+        dryRun
+      );
+      break;
     default:
-      console.log("❌ Invalid choice. Please run again and choose 1-6.");
+      console.log("❌ Invalid choice. Please run again and choose 1-7.");
+  }
+
+  // Final summary for multiple weeks
+  if (isMultipleWeeks && choice !== "1") {
+    console.log(`\n${"=".repeat(60)}`);
+    console.log(
+      `✅ Completed processing ${multipleWeeks.length} weeks for ${syncTypes[choice]}`
+    );
+    console.log(`📅 Weeks processed: ${dateSelection.weekNumbers.join(", ")}`);
+    console.log(`${"=".repeat(60)}`);
   }
 }
 
